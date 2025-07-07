@@ -24,13 +24,6 @@ def pct_or_blank(v):           # % formatter that hides NaNs
     return "" if pd.isna(v) else f"{v:.2%}"
 
 
-def diff_formatter(v, is_diff_row=False, hide_for_diff=False):
-    """Custom formatter that hides values for Diff rows when specified"""
-    if is_diff_row and hide_for_diff:
-        return ""
-    return "" if pd.isna(v) else f"{v:.2%}"
-
-
 def _colour(val, p):
     if pd.isna(val) or pd.isna(p):
         return "black"
@@ -185,7 +178,14 @@ def build_strategy_table(
         .sort_index()
     )
 
-    # Apply column renaming
+    # ---- Replace NaN values with empty strings for Diff rows -------
+    diff_mask = wide.index.get_level_values(1) == "Diff"
+    cols_to_hide = [accts_col, "accts_pct", bal_col, "bal_pct"]
+    for col in cols_to_hide:
+        if col in wide.columns:
+            wide.loc[diff_mask, col] = ""
+
+    # Apply column renaming AFTER cleaning the data
     wide = wide.rename(columns=final_column_names)
     
     # Update display_cols with new names for formatting
@@ -215,38 +215,29 @@ def build_strategy_table(
         month, strat = s.name
         if strat != "Diff" or month not in pval_data:
             return [""] * len(s)
+        
         pvals = pval_data[month]
         styles = []
-        for col in s.index:
-            # Find original column name for this renamed column
-            orig_col = None
-            for orig, renamed in final_column_names.items():
-                if renamed == col:
-                    orig_col = orig
+        
+        for col_name in s.index:
+            # Find the original column name that corresponds to this renamed column
+            original_col = None
+            for orig_col in metric_cols:
+                if final_column_names.get(orig_col, orig_col) == col_name:
+                    original_col = orig_col
                     break
-            if orig_col and orig_col in metric_cols:
-                styles.append(f"color: {_colour(s[col], pvals.get(orig_col, np.nan))}")
+            
+            if original_col and original_col in pvals:
+                color = _colour(s[col_name], pvals[original_col])
+                styles.append(f"color: {color}")
             else:
                 styles.append("")
+        
         return styles
 
     def bold_diff_rows(s: pd.Series):
         _, strat = s.name
         return ["font-weight: bold" if strat == "Diff" else ""] * len(s)
-
-    def format_diff_rows(s: pd.Series):
-        """Custom formatter to hide values in Diff rows for specific columns"""
-        month, strat = s.name
-        if strat != "Diff":
-            return s
-        
-        # Hide values for these columns in Diff rows
-        hide_cols = [accts_renamed, accts_pct_renamed, bal_renamed, bal_pct_renamed]
-        formatted = s.copy()
-        for col in hide_cols:
-            if col in formatted.index:
-                formatted[col] = ""
-        return formatted
 
     # Get unique months to calculate row positions for styling
     months = wide.index.get_level_values(0).unique()
@@ -273,30 +264,5 @@ def build_strategy_table(
         ] + border_styles)
         .set_caption(f"{control_label} vs {test_label} – Monthly Summary")
     )
-    
-    # Apply custom formatting to hide values in Diff rows for specific columns
-    def hide_diff_values(val, row_name):
-        month, strat = row_name
-        col_name = val.name if hasattr(val, 'name') else None
-        if strat == "Diff" and col_name in [accts_renamed, accts_pct_renamed, bal_renamed, bal_pct_renamed]:
-            return ""
-        return val
-
-    # Apply the hiding function using applymap with a custom function
-    def apply_hide_function(df_subset):
-        result = df_subset.copy()
-        for idx in df_subset.index:
-            if idx[1] == "Diff":  # If this is a Diff row
-                for col in [accts_renamed, accts_pct_renamed, bal_renamed, bal_pct_renamed]:
-                    if col in result.columns:
-                        result.loc[idx, col] = ""
-        return result
-
-    # Override the format for specific cells
-    for col in [accts_renamed, accts_pct_renamed, bal_renamed, bal_pct_renamed]:
-        if col in wide.columns:
-            styler = styler.format({col: lambda x, col=col: "" if pd.isna(x) else (fmt.get(col, "{}")
-                                   .format(x) if col not in [accts_pct_renamed, bal_pct_renamed] 
-                                   else f"{x:.1%}")}, subset=(slice(None), "Diff"))
 
     return wide, styler
