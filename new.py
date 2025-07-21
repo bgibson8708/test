@@ -75,6 +75,12 @@ def format_rollrate_table(df, strategy_name="No LM Test"):
             for col in rr_cols:
                 control_val = control_row[col]
                 test_val = test_row[col]
+                
+                # Check if either value is NULL/NaN
+                if pd.isna(control_val) or pd.isna(test_val):
+                    diff_row[col] = ('', 'black')  # Empty string with black color
+                    continue
+                
                 diff = control_val - test_val
                 
                 # For proportional z-test, we need the number of accounts
@@ -193,12 +199,22 @@ def format_rollrate_table(df, strategy_name="No LM Test"):
         # RR columns
         for col in rr_cols:
             if 'Difference' in str(row['strategy']):
-                # This is a difference row
-                val, color = row[col]
-                html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: right; color: {color};">{val*100:.2f}%</td>\n'
+                # This is a difference row - handle tuple format
+                if isinstance(row[col], tuple):
+                    val, color = row[col]
+                    if val == '':  # Handle empty values
+                        html += f'<td style="border: 1px solid #ddd; padding: 8px;"></td>\n'
+                    else:
+                        html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: right; color: {color}; font-weight: bold;">{val*100:.2f}%</td>\n'
+                else:
+                    # Shouldn't happen, but handle gracefully
+                    html += f'<td style="border: 1px solid #ddd; padding: 8px;"></td>\n'
             else:
-                # Regular row
-                html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{row[col]*100:.2f}%</td>\n'
+                # Regular row - check for NULL/NaN values
+                if pd.isna(row[col]):
+                    html += f'<td style="border: 1px solid #ddd; padding: 8px;"></td>\n'
+                else:
+                    html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{row[col]*100:.2f}%</td>\n'
         
         html += '</tr>\n'
     
@@ -206,9 +222,9 @@ def format_rollrate_table(df, strategy_name="No LM Test"):
     
     return html
 
-# Example usage:
-def create_sample_data():
-    """Create sample data for testing"""
+# Example usage with NULL values:
+def create_sample_data_with_nulls():
+    """Create sample data with NULL values for testing"""
     data = {
         'cycle_start_year_month': ['202410', '202410', '202410', '202411', '202411', '202411'],
         'strategy': ['Control', 'No LM Test', None, 'Control', 'No LM Test', None],
@@ -222,10 +238,10 @@ def create_sample_data():
         'rr2_5_acct': [0.32, 0.36, 0.38, 0.31, 0.35, 0.37],
         'rr2_6_dol': [0.45, 0.50, 0.50, 0.44, 0.49, 0.49],
         'rr2_6_acct': [0.42, 0.47, 0.48, 0.41, 0.46, 0.47],
-        'rr2_7_dol': [0.55, 0.61, 0.60, 0.54, 0.60, 0.59],
-        'rr2_7_acct': [0.52, 0.58, 0.58, 0.51, 0.57, 0.57],
-        'rr2_8_dol': [0.65, 0.72, 0.70, 0.64, 0.71, 0.69],
-        'rr2_8_acct': [0.62, 0.69, 0.68, 0.61, 0.68, 0.67]
+        'rr2_7_dol': [0.55, 0.61, 0.60, None, None, None],  # NULL for newer month
+        'rr2_7_acct': [0.52, 0.58, 0.58, None, None, None],  # NULL for newer month
+        'rr2_8_dol': [0.65, 0.72, 0.70, None, None, None],  # NULL for newer month
+        'rr2_8_acct': [0.62, 0.69, 0.68, None, None, None]  # NULL for newer month
     }
     return pd.DataFrame(data)
 
