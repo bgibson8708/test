@@ -4,13 +4,14 @@ from scipy import stats
 import warnings
 warnings.filterwarnings('ignore')
 
-def format_rollrate_table(df, strategy_name="No LM Test"):
+def format_rollrate_table(df, strategy_name="No LM Test", debug=False):
     """
     Format a roll rate dataframe into an HTML table with color-coded differences.
     
     Parameters:
     df: pandas DataFrame with columns as described
     strategy_name: string name of the test strategy (default: "No LM Test")
+    debug: boolean to print debug information (default: False)
     """
     
     # Create a copy to avoid modifying original
@@ -135,44 +136,63 @@ def format_rollrate_table(df, strategy_name="No LM Test"):
                 # For proportional z-test, we need the number of accounts
                 if col.endswith('_acct'):
                     # Use account-based proportions
-                    n_control = control_row['accts']
-                    n_test = test_row['accts']
+                    n_control = int(control_row['accts'])
+                    n_test = int(test_row['accts'])
                 else:  # ends with '_dol'
                     # Use balance-based proportions (weighted by dollars)
-                    n_control = control_row['bal_dollars']
-                    n_test = test_row['bal_dollars']
+                    n_control = int(control_row['bal_dollars'])
+                    n_test = int(test_row['bal_dollars'])
                 
                 # Perform proportional z-test
                 color = 'black'  # default
-                if n_control > 0 and n_test > 0 and control_val >= 0 and test_val >= 0:
+                pval = 1.0  # default
+                
+                if n_control > 0 and n_test > 0 and control_val > 0 and test_val > 0:
                     try:
-                        # Convert percentages to counts for the test
-                        x_control = int(control_val * n_control)
-                        x_test = int(test_val * n_test)
+                        # Convert proportions to successes
+                        successes_control = int(control_val * n_control)
+                        successes_test = int(test_val * n_test)
                         
-                        # Two-proportion z-test
-                        count = np.array([x_control, x_test])
-                        nobs = np.array([n_control, n_test])
+                        # Calculate pooled proportion
+                        p_pool = (successes_control + successes_test) / (n_control + n_test)
                         
-                        stat, pval = stats.proportions_ztest(count, nobs)
+                        # Calculate standard error
+                        se = np.sqrt(p_pool * (1 - p_pool) * (1/n_control + 1/n_test))
                         
-                        # Determine color based on p-value and direction
-                        if diff < 0:  # Negative is good
-                            if pval < 0.05:
-                                color = 'green'
-                            elif pval < 0.1:
-                                color = 'blue'
-                            else:
-                                color = 'black'
-                        else:  # Positive is bad
-                            if pval < 0.05:
-                                color = 'red'
-                            elif pval < 0.1:
-                                color = 'orange'
-                            else:
-                                color = 'black'
-                    except:
+                        # Calculate z-statistic
+                        if se > 0:
+                            z_stat = (control_val - test_val) / se
+                            # Two-tailed p-value
+                            pval = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+                            
+                            if debug:
+                                print(f"\n{col}: Control={control_val:.4f}, Test={test_val:.4f}, Diff={diff:.4f}")
+                                print(f"  n_control={n_control}, n_test={n_test}")
+                                print(f"  z_stat={z_stat:.4f}, p_value={pval:.4f}")
+                        
+                    except Exception as e:
+                        if debug:
+                            print(f"Error in {col}: {e}")
+                        pval = 1.0
+                
+                # Determine color based on p-value and direction
+                if diff < 0:  # Negative is good (Control < Test means Test is worse at rolling)
+                    if pval < 0.05:
+                        color = 'green'
+                    elif pval < 0.10:
+                        color = 'blue'
+                    else:
                         color = 'black'
+                else:  # Positive is bad (Control > Test means Test is better at rolling)
+                    if pval < 0.05:
+                        color = 'red'
+                    elif pval < 0.10:
+                        color = 'orange'
+                    else:
+                        color = 'black'
+                
+                if debug:
+                    print(f"  Color assigned: {color}")
                 
                 # Add the cell with color
                 html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: right; color: {color};">{diff*100:.2f}%</td>\n'
@@ -183,34 +203,38 @@ def format_rollrate_table(df, strategy_name="No LM Test"):
     
     return html
 
-# Example usage with NULL values:
-def create_sample_data_with_nulls():
-    """Create sample data with NULL values for testing"""
+# Create sample data with more significant differences
+def create_sample_data_with_differences():
+    """Create sample data with significant differences for testing"""
     data = {
         'cycle_start_year_month': ['202410', '202410', '202410', '202411', '202411', '202411'],
         'strategy': ['Control', 'No LM Test', None, 'Control', 'No LM Test', None],
         'accts': [1000, 1200, 300, 1100, 1300, 250],
         'bal_dollars': [500000, 600000, 150000, 550000, 650000, 125000],
-        'rr2_3_dol': [0.15, 0.17, 0.20, 0.14, 0.16, 0.19],
-        'rr2_3_acct': [0.12, 0.14, 0.18, 0.11, 0.13, 0.17],
-        'rr2_4_dol': [0.25, 0.28, 0.30, 0.24, 0.27, 0.29],
-        'rr2_4_acct': [0.22, 0.25, 0.28, 0.21, 0.24, 0.27],
-        'rr2_5_dol': [0.35, 0.39, 0.40, 0.34, 0.38, 0.39],
-        'rr2_5_acct': [0.32, 0.36, 0.38, 0.31, 0.35, 0.37],
-        'rr2_6_dol': [0.45, 0.50, 0.50, 0.44, 0.49, 0.49],
-        'rr2_6_acct': [0.42, 0.47, 0.48, 0.41, 0.46, 0.47],
-        'rr2_7_dol': [0.55, 0.61, 0.60, None, None, None],  # NULL for newer month
-        'rr2_7_acct': [0.52, 0.58, 0.58, None, None, None],  # NULL for newer month
-        'rr2_8_dol': [0.65, 0.72, 0.70, None, None, None],  # NULL for newer month
-        'rr2_8_acct': [0.62, 0.69, 0.68, None, None, None]  # NULL for newer month
+        # Making differences more significant
+        'rr2_3_dol': [0.15, 0.12, 0.20, 0.14, 0.10, 0.19],  # Control worse (good)
+        'rr2_3_acct': [0.12, 0.09, 0.18, 0.11, 0.08, 0.17],  # Control worse (good)
+        'rr2_4_dol': [0.25, 0.30, 0.30, 0.24, 0.29, 0.29],  # Control better (bad)
+        'rr2_4_acct': [0.22, 0.27, 0.28, 0.21, 0.26, 0.27],  # Control better (bad)
+        'rr2_5_dol': [0.35, 0.35, 0.40, 0.34, 0.34, 0.39],  # No difference
+        'rr2_5_acct': [0.32, 0.32, 0.38, 0.31, 0.31, 0.37],  # No difference
+        'rr2_6_dol': [0.45, 0.40, 0.50, 0.44, 0.39, 0.49],  # Control worse (good)
+        'rr2_6_acct': [0.42, 0.37, 0.48, 0.41, 0.36, 0.47],  # Control worse (good)
+        'rr2_7_dol': [0.55, 0.65, 0.60, None, None, None],  # Control better (bad)
+        'rr2_7_acct': [0.52, 0.62, 0.58, None, None, None],  # Control better (bad)
+        'rr2_8_dol': [0.65, 0.65, 0.70, None, None, None],  # No difference
+        'rr2_8_acct': [0.62, 0.62, 0.68, None, None, None]  # No difference
     }
     return pd.DataFrame(data)
 
-# Test the function with sample data
-def test_with_debug():
-    """Test function that creates a sample HTML file to verify colors work"""
-    df = create_sample_data_with_nulls()
-    html = format_rollrate_table(df)
+# Test the function with debug output
+def test_with_debug_output():
+    """Test function with debug output to see p-values"""
+    df = create_sample_data_with_differences()
+    print("Testing with debug output to see p-values and color assignments:")
+    print("=" * 80)
+    
+    html = format_rollrate_table(df, debug=True)
     
     # Add a complete HTML wrapper for standalone testing
     full_html = f"""
@@ -224,30 +248,32 @@ def test_with_debug():
     </head>
     <body>
         <h2>Roll Rate Analysis Report</h2>
+        <p>Color Legend:</p>
+        <ul>
+            <li style="color: green; font-weight: bold;">Green: Control has lower roll rate (good), p &lt; 0.05</li>
+            <li style="color: blue; font-weight: bold;">Blue: Control has lower roll rate (good), p &lt; 0.10</li>
+            <li style="color: red; font-weight: bold;">Red: Test has lower roll rate (bad), p &lt; 0.05</li>
+            <li style="color: orange; font-weight: bold;">Orange: Test has lower roll rate (bad), p &lt; 0.10</li>
+            <li style="color: black; font-weight: bold;">Black: Not statistically significant</li>
+        </ul>
         {html}
     </body>
     </html>
     """
     
-    with open('rollrate_test.html', 'w') as f:
+    with open('rollrate_test_debug.html', 'w') as f:
         f.write(full_html)
     
-    print("Test HTML file created as 'rollrate_test.html'")
-    print("\nSample of color styling in difference rows:")
-    print("- Green: Control better than Test (p < 0.05)")
-    print("- Blue: Control better than Test (p < 0.10)")
-    print("- Red: Test better than Control (p < 0.05)")
-    print("- Orange: Test better than Control (p < 0.10)")
-    print("- Black: Not statistically significant")
+    print("\n" + "=" * 80)
+    print("Test HTML file created as 'rollrate_test_debug.html'")
+    print("Check the console output above to see the p-values and color assignments.")
+    
+    return html
 
 # To use with your actual data:
-# df = pd.read_csv('your_file.csv')  # or however you load your data
-# html_table = format_rollrate_table(df, strategy_name="Your Test Name")
+# df = pd.read_csv('your_file.csv')
+# html_table = format_rollrate_table(df, strategy_name="Your Test Name", debug=True)
 # 
 # # Save to file
 # with open('rollrate_table.html', 'w') as f:
 #     f.write(html_table)
-# 
-# # Or display in Jupyter notebook
-# from IPython.display import HTML
-# HTML(html_table)
