@@ -90,6 +90,25 @@ def perform_monthly_ttests(df):
             
         results['ICS3 Score'].append(ics3_p)
     
+    # Add Total row - aggregate all months
+    all_test_data = df_filtered[df_filtered['strategy'] == 'test']
+    all_control_data = df_filtered[df_filtered['strategy'] == 'control']
+    
+    if len(all_test_data) > 0 and len(all_control_data) > 0:
+        results['Month'].append('Total')
+        
+        # Total Balance t-test
+        total_bal_t, total_bal_p = aggregate_and_test(all_test_data, all_control_data, 'bal_dollars')
+        results['Balance'].append(total_bal_p)
+        
+        # Total Beacon Score t-test
+        total_beacon_t, total_beacon_p = aggregate_and_test(all_test_data, all_control_data, 'beacon_scr')
+        results['Beacon Score'].append(total_beacon_p)
+        
+        # Total ICS3 Score t-test
+        total_ics3_t, total_ics3_p = aggregate_and_test(all_test_data, all_control_data, 'ics3_score')
+        results['ICS3 Score'].append(total_ics3_p)
+    
     # Create DataFrame
     results_df = pd.DataFrame(results)
     
@@ -127,13 +146,37 @@ def aggregate_and_test(test_data, control_data, metric_prefix):
     # Aggregate test data
     test_n_total = test_data['accts'].sum()
     test_mean = np.average(test_data[f'{metric_prefix}_avg'], weights=test_data['accts'])
-    test_var = np.average(test_data[f'{metric_prefix}_sd']**2, weights=test_data['accts'])
+    
+    # Calculate pooled variance across all test observations
+    test_var_components = []
+    test_weights = []
+    for idx, row in test_data.iterrows():
+        n = row['accts']
+        var = row[f'{metric_prefix}_sd']**2
+        mean_i = row[f'{metric_prefix}_avg']
+        # Within-group variance plus between-group variance
+        test_var_components.append(var + (mean_i - test_mean)**2)
+        test_weights.append(n)
+    
+    test_var = np.average(test_var_components, weights=test_weights)
     test_sd = np.sqrt(test_var)
     
     # Aggregate control data
     control_n_total = control_data['accts'].sum()
     control_mean = np.average(control_data[f'{metric_prefix}_avg'], weights=control_data['accts'])
-    control_var = np.average(control_data[f'{metric_prefix}_sd']**2, weights=control_data['accts'])
+    
+    # Calculate pooled variance across all control observations
+    control_var_components = []
+    control_weights = []
+    for idx, row in control_data.iterrows():
+        n = row['accts']
+        var = row[f'{metric_prefix}_sd']**2
+        mean_i = row[f'{metric_prefix}_avg']
+        # Within-group variance plus between-group variance
+        control_var_components.append(var + (mean_i - control_mean)**2)
+        control_weights.append(n)
+    
+    control_var = np.average(control_var_components, weights=control_weights)
     control_sd = np.sqrt(control_var)
     
     return welch_ttest_from_stats(test_mean, test_sd, test_n_total, 
@@ -160,6 +203,15 @@ def style_pvalues(df):
         'Beacon Score': '{:.4f}',
         'ICS3 Score': '{:.4f}'
     })
+    
+    # Add a separator line before Total row
+    def highlight_total_row(row):
+        if row['Month'] == 'Total':
+            return ['border-top: 2px solid black'] * len(row)
+        else:
+            return [''] * len(row)
+    
+    styled = styled.apply(highlight_total_row, axis=1)
     
     return styled
 
